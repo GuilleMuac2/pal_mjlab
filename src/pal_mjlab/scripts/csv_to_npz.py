@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import mjlab
@@ -328,6 +329,7 @@ def run_sim(
   line_range,
   upload_to_wandb: bool = False,
   renderer: OffscreenRenderer | None = None,
+  output_dir: str = "artifacts",
 ):
   motion = MotionLoader(
     motion_file=input_file,
@@ -442,8 +444,10 @@ def run_sim(
         ):
           log[k] = np.stack(log[k], axis=0)
 
-        print("Saving to /tmp/motion.npz...")
-        np.savez("/tmp/motion.npz", **log)
+        output_file = Path(output_dir) / output_name / "motion.npz"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Saving to {output_file}...")
+        np.savez(output_file, **log)
 
         run = None
         if upload_to_wandb:
@@ -455,7 +459,7 @@ def run_sim(
           print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
           REGISTRY = "motions"
           logged_artifact = run.log_artifact(
-            artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY
+            artifact_or_path=str(output_file), name=COLLECTION, type=REGISTRY
           )
           run.link_artifact(
             artifact=logged_artifact,
@@ -488,19 +492,23 @@ def main(
   render: bool = False,
   line_range: tuple[int, int] | None = None,
   upload_to_wandb: bool = False,
+  output_dir: str = "artifacts",
 ):
   """Replay motion from CSV file and output to npz file.
 
   Args:
     robot_name: Name of the robot ('talos', or 'kangaroo').
     input_file: Path to the input CSV file.
-    output_name: Path to the output npz file.
+    output_name: Name of the motion; the npz is saved to
+      <output_dir>/<output_name>/motion.npz (and is the wandb collection name).
     input_fps: Frame rate of the CSV file.
     output_fps: Desired output frame rate.
     device: Device to use.
     render: Whether to render the simulation and save a video.
     line_range: Range of lines to process from the CSV file.
     upload_to_wandb: Whether to upload the motion (and video) to the wandb registry.
+    output_dir: Directory where the npz is saved, so that it can be passed to
+      training with --env.commands.motion.motion-file.
   """
   if robot_name not in ROBOT_CONFIGS:
     raise ValueError(
@@ -559,6 +567,7 @@ def main(
     line_range=line_range,
     upload_to_wandb=upload_to_wandb,
     renderer=renderer,
+    output_dir=output_dir,
   )
 
 

@@ -1,5 +1,6 @@
 """Pal Robotics KANGAROO constants."""
 
+import re
 from pathlib import Path
 
 import mujoco
@@ -400,8 +401,43 @@ def _build_action_scales(
   return scales, tuple(names)
 
 
+def _build_range_aware_action_scales(
+  articulation: EntityArticulationInfoCfg,
+  spec_fn,
+  exclude: set = frozenset(),
+  range_factor: float = 0.25,
+) -> dict[str, float]:
+  """Per-joint action scale: max(0.25 * effort / Kp, range_factor * half range).
+
+  The torque-normalized term alone gives joints with a large reflected inertia
+  (high Kp) but light links, such as the arms, only ~0.05 rad per unit action,
+  far less than the ~1.5 rad they move when dancing. Taking the max with the
+  half range keeps the same meaning for the 0.25 factor: a unit action is ~25%
+  of either the torque authority or the joint travel, whichever is larger, so
+  |a| ~ 4 saturates the torque or spans half the range. Strong joints (legs)
+  keep their torque-normalized scale unchanged.
+  """
+  half_range = {
+    j.name: 0.5 * (j.range[1] - j.range[0]) for j in spec_fn().joints if j.name
+  }
+  torque_scales, _ = _build_action_scales(articulation, exclude)
+  scales = {}
+  for expr, torque_scale in torque_scales.items():
+    for joint_name, half in half_range.items():
+      if re.fullmatch(expr, joint_name):
+        scales[joint_name] = float(max(torque_scale, range_factor * half))
+  return scales
+
+
 KANGAROO_ACTION_SCALE, KANGAROO_ACTUATOR_NAMES = _build_action_scales(
   KANGAROO_ARTICULATION, _EXCLUDED_JOINTS
+)
+KANGAROO_RANGE_ACTION_SCALE = _build_range_aware_action_scales(
+  KANGAROO_ARTICULATION, get_kangaroo_spec, _EXCLUDED_JOINTS
+)
+# Wider variant (range term x1.4) to study the sensitivity to the action scale.
+KANGAROO_WIDE_RANGE_ACTION_SCALE = _build_range_aware_action_scales(
+  KANGAROO_ARTICULATION, get_kangaroo_spec, _EXCLUDED_JOINTS, range_factor=0.35
 )
 KANGAROO_LOWER_BODY_ACTION_SCALE, KANGAROO_LOWER_BODY_ACTUATOR_NAMES = (
   _build_action_scales(KANGAROO_LOWER_BODY_ARTICULATION, _EXCLUDED_JOINTS)

@@ -7,7 +7,10 @@ from mjlab.rl import (
 )
 
 
-def pal_kangaroo_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+def pal_kangaroo_tracking_ppo_runner_cfg(
+  entropy_coef: float = 0.005,
+  init_std: float = 1.0,
+) -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for PAL Kangaroo tracking task."""
   return RslRlOnPolicyRunnerCfg(
     actor=RslRlModelCfg(
@@ -16,7 +19,7 @@ def pal_kangaroo_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       obs_normalization=True,
       distribution_cfg={
         "class_name": "GaussianDistribution",
-        "init_std": 1.0,
+        "init_std": init_std,
         "std_type": "scalar",
       },
     ),
@@ -29,7 +32,7 @@ def pal_kangaroo_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.005,
+      entropy_coef=entropy_coef,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
@@ -40,7 +43,7 @@ def pal_kangaroo_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="kangaroo_tracking",
-    save_interval=500,
+    save_interval=100,
     num_steps_per_env=24,
     max_iterations=30_000,
   )

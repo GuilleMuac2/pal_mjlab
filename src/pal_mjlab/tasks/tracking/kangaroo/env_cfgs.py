@@ -1,13 +1,15 @@
 """PAL Robotics Kangaroo Flat terrain tracking configuration."""
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp import dr
+from mjlab.envs.mdp import dr, reward_curriculum
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.tracking import mdp as tracking_mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
@@ -24,10 +26,26 @@ from pal_mjlab.robots import (
 )
 from pal_mjlab.tasks.velocity import mdp
 
+# Lower body bodies tracked with tighter tolerances when strict_lower_body=True.
+# The global tracking terms (std 0.3 m / 0.4 rad / 1.0 m/s) barely reward errors
+# of a few cm, so small hops and heel taps are ignored. With std 0.1 m a 3 cm
+# foot error gives exp(-0.03^2/0.1^2) = 0.91 instead of 0.99.
+LOWER_BODY_NAMES = (
+  "leg_left_3_link",
+  "leg_left_4_link",
+  "leg_left_5_link",
+  "leg_right_3_link",
+  "leg_right_4_link",
+  "leg_right_5_link",
+)
+
 
 def pal_kangaroo_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  action_scale: dict[str, float] | None = None,
+  strict_lower_body: bool = False,
+  action_rate_curriculum: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PAL Robotics Talos flat terrain tracking configuration."""
   cfg = make_tracking_env_cfg()
@@ -69,7 +87,7 @@ def pal_kangaroo_flat_tracking_env_cfg(
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
-  joint_pos_action.scale = KANGAROO_ACTION_SCALE
+  joint_pos_action.scale = action_scale or KANGAROO_ACTION_SCALE
   joint_pos_action.actuator_names = KANGAROO_ACTUATOR_NAMES
 
   assert cfg.commands is not None
@@ -147,6 +165,41 @@ def pal_kangaroo_flat_tracking_env_cfg(
       "hull_points": ANKLE_XY_CONVEX_HULL_POINTS,
     },
   )
+
+  if strict_lower_body:
+    cfg.rewards["motion_lower_body_pos"] = RewardTermCfg(
+      func=tracking_mdp.motion_relative_body_position_error_exp,
+      weight=1.0,
+      params={"command_name": "motion", "std": 0.1, "body_names": LOWER_BODY_NAMES},
+    )
+    cfg.rewards["motion_lower_body_ori"] = RewardTermCfg(
+      func=tracking_mdp.motion_relative_body_orientation_error_exp,
+      weight=1.0,
+      params={"command_name": "motion", "std": 0.2, "body_names": LOWER_BODY_NAMES},
+    )
+    cfg.rewards["motion_lower_body_lin_vel"] = RewardTermCfg(
+      func=tracking_mdp.motion_global_body_linear_velocity_error_exp,
+      weight=1.0,
+      params={"command_name": "motion", "std": 0.5, "body_names": LOWER_BODY_NAMES},
+    )
+
+  if action_rate_curriculum:
+    # Explore with a low action_rate penalty first, then ramp it up to the
+    # default -0.1 so the final policy is smooth enough for the real robot.
+    # Steps are env steps: 24 per PPO iteration (iterations 300/400/500).
+    cfg.rewards["action_rate_l2"].weight = -0.01
+    cfg.curriculum["action_rate_l2"] = CurriculumTermCfg(
+      func=reward_curriculum,
+      params={
+        "reward_name": "action_rate_l2",
+        "stages": [
+          {"step": 0, "weight": -0.01},
+          {"step": 24 * 300, "weight": -0.03},
+          {"step": 24 * 400, "weight": -0.06},
+          {"step": 24 * 500, "weight": -0.1},
+        ],
+      },
+    )
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["body_friction"] = EventTermCfg(
